@@ -1,3 +1,5 @@
+import pytest
+from pytest import raises
 from viper import compiler
 from viper.exceptions import InvalidTypeException, \
     TypeMismatchException, \
@@ -1903,11 +1905,8 @@ def foo():
     y = min(block.timestamp + 30, block.timestamp + 50)
 """)
 
+
 # Run all of our registered tests
-import pytest
-from pytest import raises
-
-
 @pytest.mark.parametrize('bad_code,exception_type', fail_list)
 def test_compilation_fails_with_exception(bad_code, exception_type):
     with raises(exception_type):
