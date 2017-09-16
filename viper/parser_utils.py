@@ -289,7 +289,7 @@ def byte_array_to_num(arg, expr, out_type):
                                     ['with', '_len', ['clamp', 0, lengetter, 32],
                                        ['seq',
                                           ['assert', ['or', ['iszero', '_len'], ['div', '_el1', ['exp', 256, 31]]]],
-                                          result]]]],
+                                        result]]]],
                              typ=BaseType(out_type), annotation='bytearray to number, verify no leading zbytes')
 
 def get_length(arg):
