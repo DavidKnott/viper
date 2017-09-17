@@ -157,8 +157,9 @@ def mk_getter(varname, typ):
 
 
 # Parse top-level functions and variables
-def get_defs_and_globals(code):
+def get_events_and_defs_and_globals(code):
     _globals = {}
+    _events =[]
     _defs = []
     _getters = []
     for item in code:
@@ -182,6 +183,8 @@ def get_defs_and_globals(code):
                 for getter in mk_getter(item.target.id, typ):
                     _getters.append(parse_line('\n' * (item.lineno - 1) + getter))
                     _getters[-1].pos = getpos(item)
+            elif isinstance(item.annotation, ast.Call) and item.annotation.func.id == "__log__":
+                _events.append(item)
             else:
                 _globals[item.target.id] = VariableRecord(item.target.id, len(_globals), parse_type(item.annotation, 'storage'), True)
         # Function definitions
@@ -189,7 +192,7 @@ def get_defs_and_globals(code):
             _defs.append(item)
         else:
             raise StructureException("Invalid top-level statement", item)
-    return _defs + _getters, _globals
+    return _defs + _getters, _globals, _events
 
 
 # Header code
@@ -256,7 +259,7 @@ def is_initializer(code):
 # Get ABI signature
 def mk_full_signature(code):
     o = []
-    _defs, _globals = get_defs_and_globals(code)
+    _defs, _globals, _events = get_events_and_defs_and_globals(code)
     for code in _defs:
         sig = FunctionSignature.from_definition(code)
         if not sig.internal:
@@ -266,16 +269,23 @@ def mk_full_signature(code):
 
 # Main python parse tree => LLL method
 def parse_tree_to_lll(code, origcode):
-    _defs, _globals = get_defs_and_globals(code)
+    _defs, _globals, _events = get_events_and_defs_and_globals(code)
+    _eventnames = [_event.target.id for _event in _events]
     _defnames = [_def.name for _def in _defs]
+    if len(set(_eventnames)) < len(_events):
+        raise VariableDeclarationException("Duplicate event name: %s" % [name for name in _defnames if _defnames.count(name) > 1][0])
     if len(set(_defnames)) < len(_defs):
         raise VariableDeclarationException("Duplicate function name: %s" % [name for name in _defnames if _defnames.count(name) > 1][0])
     # Initialization function
     initfunc = [_def for _def in _defs if is_initializer(_def)]
     # Regular functions
     otherfuncs = [_def for _def in _defs if not is_initializer(_def)]
+    sigs = {}
     # Create the main statement
     o = ['seq']
+    if _events:
+        for event in _events:
+            sigs[event.target.id] = EventSignature.from_declaration(event)
     # If there is an init func...
     if initfunc:
         o.append(initializer_lll)
@@ -284,7 +294,7 @@ def parse_tree_to_lll(code, origcode):
     if otherfuncs:
         sub = ['seq', initializer_lll]
         add_gas = initializer_lll.gas
-        sigs = {}
+        # sigs = {}
         for _def in otherfuncs:
             sub.append(parse_func(_def, _globals, {'self': sigs}, origcode))
             sub[-1].total_gas += add_gas
@@ -980,6 +990,19 @@ def parse_stmt(stmt, context):
     elif isinstance(stmt, ast.Call):
         if isinstance(stmt.func, ast.Name) and stmt.func.id in stmt_dispatch_table:
             return stmt_dispatch_table[stmt.func.id](stmt, context)
+        elif isinstance(stmt.func, ast.Attribute) and stmt.func.value.id == 'log':
+            if stmt.func.attr not in context.sigs['self']:
+                raise VariableDeclarationException("Event not declared yet: %s" % stmt.func.attr)
+            event = context.sigs['self'][stmt.func.attr]
+            topics = []
+            for pos, is_indexed in enumerate(event.indexed_list):
+                if is_indexed:
+                    event.args.pop(pos)
+                    arg = stmt.args.pop(pos)
+                    topics.append(parse_value_expr(arg, context))
+            inargs, inargsize = pack_arguments(event,
+                                               [parse_expr(arg, context) for arg in stmt.args], context)
+            return LLLnode.from_list(['seq', inargs, ["log"+str(topics), inargs, inargsize, topics], typ=None, pos=getpos(stmt))
         elif isinstance(stmt.func, ast.Attribute) and isinstance(stmt.func.value, ast.Name) and stmt.func.value.id == "self":
             if stmt.func.attr not in context.sigs['self']:
                 raise VariableDeclarationException("Function not declared yet (reminder: functions cannot "
