@@ -282,6 +282,9 @@ def mk_full_signature(code):
         sig = FunctionSignature.from_definition(code)
         if not sig.internal:
             o.append(sig.to_abi_dict())
+    for code in _events:
+        sig = EventSignature.from_declaration(code)
+        o.append(sig.to_abi_dict())
     return o
 
 
@@ -1077,6 +1080,31 @@ def parse_stmt(stmt, context):
                                      typ=None, pos=getpos(stmt))
         elif isinstance(stmt.func, ast.Attribute) and isinstance(stmt.func.value, ast.Call):
             return external_contract_call_stmt(stmt, context)
+        elif isinstance(stmt.func, ast.Attribute) and stmt.func.value.id == 'log':
+            if stmt.func.attr not in context.sigs['self']:
+                raise VariableDeclarationException("Event not declared yet: %s" % stmt.func.attr)
+            event = context.sigs['self'][stmt.func.attr]
+            topics = [event.event_id]
+            stored_topics = ['seq']
+            topics_count = 1
+            for pos, is_indexed in enumerate(event.indexed_list):
+                if is_indexed:
+                    event.args.pop(pos+1-topics_count)
+                    arg = stmt.args.pop(pos+1-topics_count)
+                    topics_count +=1
+                    if isinstance(arg, ast.Str):
+                        stored_topics.append(parse_value_expr(arg, context))
+                        topics.append(['mload', stored_topics[-1].to_list()[-1][-1][-1] + 32])
+                    else:
+                        topics.append(parse_value_expr(arg, context))
+            # if len(stmt.args) == 1 and isinstance(stmt.args[0], ast.Str):
+                # import pdb; pdb.set_trace()
+                # inargs, inargsize = parse_expr(stmt.args[0], context), 64
+            # else: 
+            # inargs.to_list()[-1][-1][-1][-1][-2][-2][0]
+            inargs, inargsize = pack_arguments(event, [parse_expr(arg, context) for arg in stmt.args], context)
+            import pdb; pdb.set_trace()
+            return LLLnode.from_list(['seq', inargs, stored_topics, ["log"+str(len(topics)), ['add', inargs, 32], inargsize] + topics], typ=None, pos=getpos(stmt))
         else:
             raise StructureException("Unsupported operator: %r" % ast.dump(stmt), stmt)
     # Asserts
@@ -1202,6 +1230,29 @@ def parse_stmt(stmt, context):
     else:
         raise StructureException("Unsupported statement type", stmt)
 
+
+def pack_event_data(signature, args, context):
+    placeholder_typ = ByteArrayType(maxlen=sum([get_size_of_type(arg.typ) for arg in signature.args]) * 32 + 32)
+    placeholder = context.new_placeholder(placeholder_typ)
+    setters = [['mstore', placeholder, signature.method_id]]
+    need_pos = False
+    for i, (arg, typ) in enumerate(zip(args, [arg.typ for arg in signature.args])):
+        if isinstance(typ, BaseType):
+            setters.append(make_setter(LLLnode.from_list(placeholder + 32 + i * 32, typ=typ), arg, 'memory'))
+        elif isinstance(typ, ByteArrayType):
+            target = LLLnode.from_list(['add', placeholder, '_poz'], typ=typ, location='memory')
+            arg_copy = LLLnode.from_list(arg, typ=arg.typ, location=arg.location)
+            setters.append(make_byte_array_copier(target, arg_copy))
+            needpos = True
+        else:
+            raise TypeMismatchException("Cannot pack argument of type %r" % typ)
+    if needpos:
+        return LLLnode.from_list(['with', '_poz', len(args) * 32, ['seq'] + setters],
+                                 typ=placeholder_typ, location='memory'), \
+            placeholder_typ.maxlen - 32
+    else:
+        return LLLnode.from_list(['seq'] + setters, typ=placeholder_typ, location='memory'), \
+            placeholder_typ.maxlen - 32
 
 # Pack function arguments for a call
 def pack_arguments(signature, args, context):

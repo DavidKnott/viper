@@ -84,7 +84,6 @@ def get_contract(source_code, *args, **kwargs):
     return chain.contract(source_code, language="viper", *args, **kwargs)
 
 
-
 @pytest.fixture
 def assert_tx_failed():
     def assert_tx_failed(tester, function_to_test, exception = tester.TransactionFailed):

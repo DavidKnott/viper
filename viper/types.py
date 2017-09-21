@@ -144,7 +144,11 @@ class NullType(NodeType):
 # Convert type into common form used in ABI
 def canonicalize_type(t):
     if isinstance(t, ByteArrayType):
-        return 'bytes'
+        # Check to see if maxlen is small enough
+        if t.maxlen <= 32:
+            return 'bytes{}'.format(t.maxlen)
+        else:
+            return 'bytes'
     if isinstance(t, ListType):
         if not isinstance(t.subtype, (ListType, BaseType)):
             raise Exception("List of byte arrays not allowed")
