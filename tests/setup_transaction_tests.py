@@ -1,3 +1,4 @@
+import pytest
 from functools import wraps
 
 from viper import parser, compile_lll, utils
@@ -81,3 +82,14 @@ def get_contract_with_gas_estimation(
 
 def get_contract(source_code, *args, **kwargs):
     return chain.contract(source_code, language="viper", *args, **kwargs)
+
+
+
+@pytest.fixture
+def assert_tx_failed():
+    def assert_tx_failed(tester, function_to_test, exception = tester.TransactionFailed):
+        initial_state = tester.s.snapshot()
+        with pytest.raises(exception):
+            function_to_test()
+        tester.s.revert(initial_state)
+    return assert_tx_failed
