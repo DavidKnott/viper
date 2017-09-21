@@ -12,6 +12,9 @@ from .function_signature import (
     FunctionSignature,
     VariableRecord,
 )
+from .signatures.event_signature import (
+    EventSignature,
+)
 from .functions import (
     dispatch_table,
     stmt_dispatch_table,
@@ -194,6 +197,7 @@ def add_global(_defs, _getters, _globals, item):
 # Parse top-level functions and variables
 def get_contracts_and_defs_and_globals(code):
     _contracts = {}
+    _events = []
     _globals = {}
     _defs = []
     _getters = []
@@ -204,13 +208,16 @@ def get_contracts_and_defs_and_globals(code):
         # Statements of the form:
         # variable_name: type
         elif isinstance(item, ast.AnnAssign):
-            _globals, _getters = add_global(_defs, _getters, _globals, item)
+            if isinstance(item.annotation, ast.Call) and item.annotation.func.id == "__log__":
+                _events.append(item)
+            else:
+                _globals, _getters = add_global(_defs, _getters, _globals, item)
         # Function definitions
         elif isinstance(item, ast.FunctionDef):
             _defs.append(item)
         else:
             raise StructureException("Invalid top-level statement", item)
-    return _contracts, _defs + _getters, _globals
+    return _contracts, _events, _defs + _getters, _globals
 
 
 # Header code
@@ -277,7 +284,7 @@ def is_initializer(code):
 # Get ABI signature
 def mk_full_signature(code):
     o = []
-    _contracts, _defs, _globals = get_contracts_and_defs_and_globals(code)
+    _contracts, _events, _defs, _globals = get_contracts_and_defs_and_globals(code)
     for code in _defs:
         sig = FunctionSignature.from_definition(code)
         if not sig.internal:
@@ -290,7 +297,7 @@ def mk_full_signature(code):
 
 # Main python parse tree => LLL method
 def parse_tree_to_lll(code, origcode):
-    _contracts, _defs, _globals = get_contracts_and_defs_and_globals(code)
+    _contracts, _events, _defs, _globals = get_contracts_and_defs_and_globals(code)
     contracts = {}
     # Create the main statement
     o = ['seq']
@@ -320,13 +327,16 @@ def parse_tree_to_lll(code, origcode):
     _defnames = [_def.name for _def in _defs]
     if len(set(_defnames)) < len(_defs):
         raise VariableDeclarationException("Duplicate function name: %s" % [name for name in _defnames if _defnames.count(name) > 1][0])
+    sigs = {}
+    if _events:
+        for event in _events:
+            sigs[event.target.id] = EventSignature.from_declaration(event)
     if initfunc:
         o.append(initializer_lll)
-        o.append(parse_func(initfunc[0], _globals, {**{'self': {}}, **contracts}, origcode))
+        o.append(parse_func(initfunc[0], _globals, {**{'self': sigs}, **contracts}, origcode))
     # If there are regular functions...
     if otherfuncs:
         add_gas = initializer_lll.gas
-        sigs = {}
         for _def in otherfuncs:
             sub.append(parse_func(_def, _globals, {**{'self': sigs}, **contracts}, origcode))
             sub[-1].total_gas += add_gas
@@ -1097,14 +1107,8 @@ def parse_stmt(stmt, context):
                         topics.append(['mload', stored_topics[-1].to_list()[-1][-1][-1] + 32])
                     else:
                         topics.append(parse_value_expr(arg, context))
-            # if len(stmt.args) == 1 and isinstance(stmt.args[0], ast.Str):
-                # import pdb; pdb.set_trace()
-                # inargs, inargsize = parse_expr(stmt.args[0], context), 64
-            # else: 
-            # inargs.to_list()[-1][-1][-1][-1][-2][-2][0]
-            inargs, inargsize = pack_arguments(event, [parse_expr(arg, context) for arg in stmt.args], context)
-            import pdb; pdb.set_trace()
-            return LLLnode.from_list(['seq', inargs, stored_topics, ["log"+str(len(topics)), ['add', inargs, 32], inargsize] + topics], typ=None, pos=getpos(stmt))
+            inargs, inargsize = pack_logging_data(event, stmt.args, context)
+            return LLLnode.from_list(['seq', inargs, stored_topics, ["log"+str(len(topics)), 320, inargsize] + topics], typ=None, pos=getpos(stmt))
         else:
             raise StructureException("Unsupported operator: %r" % ast.dump(stmt), stmt)
     # Asserts
@@ -1231,28 +1235,28 @@ def parse_stmt(stmt, context):
         raise StructureException("Unsupported statement type", stmt)
 
 
-def pack_event_data(signature, args, context):
-    placeholder_typ = ByteArrayType(maxlen=sum([get_size_of_type(arg.typ) for arg in signature.args]) * 32 + 32)
-    placeholder = context.new_placeholder(placeholder_typ)
-    setters = [['mstore', placeholder, signature.method_id]]
-    need_pos = False
+# Pack logging data arguments
+def pack_logging_data(signature, args, context):
+    from viper.utils import int_to_bytes
+    holders = ['seq']
+    maxlen = len(args) * 32
     for i, (arg, typ) in enumerate(zip(args, [arg.typ for arg in signature.args])):
+        placeholder = context.new_placeholder(BaseType(32))
         if isinstance(typ, BaseType):
-            setters.append(make_setter(LLLnode.from_list(placeholder + 32 + i * 32, typ=typ), arg, 'memory'))
+            input = parse_expr(arg, context)
+            holders.append(LLLnode.from_list(['mstore', placeholder, input], typ=typ, location='memory'))
         elif isinstance(typ, ByteArrayType):
-            target = LLLnode.from_list(['add', placeholder, '_poz'], typ=typ, location='memory')
-            arg_copy = LLLnode.from_list(arg, typ=arg.typ, location=arg.location)
-            setters.append(make_byte_array_copier(target, arg_copy))
-            needpos = True
-        else:
-            raise TypeMismatchException("Cannot pack argument of type %r" % typ)
-    if needpos:
-        return LLLnode.from_list(['with', '_poz', len(args) * 32, ['seq'] + setters],
-                                 typ=placeholder_typ, location='memory'), \
-            placeholder_typ.maxlen - 32
-    else:
-        return LLLnode.from_list(['seq'] + setters, typ=placeholder_typ, location='memory'), \
-            placeholder_typ.maxlen - 32
+            bytez = b''
+            for c in arg.s:
+                if ord(c) >= 256:
+                    raise InvalidLiteralException("Cannot insert special character %r into byte array" % c, expr)
+                bytez += bytes([ord(c)])
+            bytez_length = len(bytez)
+            if len(bytez) > 32:
+                raise InvalidLiteralException("Can only log a maximum of 32 bytes at a time.")
+            holders.append(LLLnode.from_list(['mstore', placeholder, bytes_to_int(bytez + b'\x00' * (32 - bytez_length))], typ=typ, location='memory'))
+    return holders, maxlen
+
 
 # Pack function arguments for a call
 def pack_arguments(signature, args, context):

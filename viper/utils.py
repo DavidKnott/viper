@@ -1,5 +1,6 @@
 import binascii
 from .opcodes import opcodes
+from rlp.sedes import big_endian_int
 try:
     from Crypto.Hash import keccak
     sha3 = lambda x: keccak.new(digest_bits=256, data=x).digest()
@@ -26,6 +27,12 @@ def bytes_to_int(bytez):
     for b in bytez:
         o = o * 256 + b
     return o
+
+# Converts an integer to bytes
+def int_to_bytes(value):
+    if isinstance(value, bytes):
+        return value
+    return big_endian_int.serialize(value)
 
 
 # Encodes an address using ethereum's checksum scheme

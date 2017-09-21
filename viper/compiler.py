@@ -16,11 +16,10 @@ def gas_estimate(origcode, *args, **kwargs):
     o = {}
     code = optimizer.optimize(parser.parse_to_lll(origcode))
     # Extract the stuff inside the LLL bracket
-    if code.value == 'seq':
+    if code.value == 'seq' and not code.args[-1].args[1].value == 0:
         code = code.args[-1].args[1].args[0]
     else:
         code = code.args[1].args[0]
-    assert code.value == 'seq'
     for arg in code.args:
         if hasattr(arg, 'func_name'):
             o[arg.func_name] = arg.total_gas
@@ -29,6 +28,7 @@ def gas_estimate(origcode, *args, **kwargs):
 
 def mk_full_signature(code, *args, **kwargs):
     abi = parser.mk_full_signature(parser.parse(code))
+    # import pdb; pdb.set_trace()
     # Add gas estimates for each function to ABI
     gas_estimates = gas_estimate(code)
     for idx, func in enumerate(abi):

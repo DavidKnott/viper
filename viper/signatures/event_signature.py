@@ -47,7 +47,7 @@ class EventSignature():
                 else:
                     indexed_list.append(False)
                 if topics_count > 4:
-                    raise VariableDeclarationException("Maximum of 3 topics {} given".format(topics_count), arg)
+                    raise VariableDeclarationException("Maximum of 3 topics {} given".format(topics_count-1), arg)
                 if not isinstance(arg, str):
                     raise VariableDeclarationException("Argument name invalid", arg)
                 if not typ:
