@@ -1121,6 +1121,11 @@ def baa():
 
 must_fail("""
 def baa():
+    return 2.0**2
+""", TypeMismatchException)
+
+must_fail("""
+def baa():
     x: bytes <= 50
     y: bytes <= 50
     z = x + y
@@ -1166,6 +1171,11 @@ must_fail("""
 def foo(inp: num) -> bytes <= 3:
     return slice(inp, start=2, len=3)
 """, TypeMismatchException)
+
+must_fail("""
+def foo():
+    block.fail
+""", Exception)
 
 must_fail("""
 def foo(inp: bytes <= 10) -> bytes <= 3:
