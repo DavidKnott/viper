@@ -9,6 +9,7 @@ def memsize_to_gas(memsize):
 
 def compile(code, *args, **kwargs):
     lll = optimizer.optimize(parser.parse_tree_to_lll(parser.parse(code), code))
+    # import pdb; pdb.set_trace()
     return compile_lll.assembly_to_evm(compile_lll.compile_to_assembly(lll))
 
 

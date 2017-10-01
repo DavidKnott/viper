@@ -61,6 +61,8 @@ class FunctionSignature():
                 raise VariableDeclarationException("Argument name invalid or reserved: " + arg.arg, arg)
             if arg.arg in (x.name for x in args):
                 raise VariableDeclarationException("Duplicate function argument name: " + arg.arg, arg)
+            # import pdb; pdb.set_trace()
+            typ.id = 'num256'
             parsed_type = parse_type(typ, None)
             args.append(VariableRecord(arg.arg, pos, parsed_type, False))
             if isinstance(parsed_type, ByteArrayType):
@@ -76,6 +78,19 @@ class FunctionSignature():
                 payable = True
             elif isinstance(dec, ast.Name) and dec.id == "internal":
                 internal = True
+            elif isinstance(dec, ast.Call) and dec.func.id == "num256_to_num":
+                # Rewrite signature based on num256_to_num decorators' args.
+                args_to_rewrite = [k.s for k in dec.args]
+                for arg in args:
+                    if arg.name in args_to_rewrite:
+                        if str(arg.typ) != 'num':
+                            raise VariableDeclarationException('Only num types can be specified in num256_to_num')
+                        else:
+                            # add attribute on the num type - to identify a num256 -> num clamp must be applied.
+                            setattr(arg.typ, 'apply_clamp', 'num')
+                        # code.args.args[0].annotation = 'num256'
+                        # arg.typ = parse_typ(code.args.args[0].annotation, None)
+                        # arg.typ.typ = 'num256'
             else:
                 raise StructureException("Bad decorator", dec)
         # Determine the return type and whether or not it's constant. Expects something
@@ -99,11 +114,20 @@ class FunctionSignature():
         method_id = fourbytes_to_int(sha3(bytes(sig, 'utf-8'))[:4])
         return cls(name, args, output_type, const, payable, internal, sig, method_id)
 
+    def get_abi_inputs(self):
+        out_list = []
+        for arg in self.args:
+            # if getattr(arg.typ, 'apply_clamp', None) == 'num256':
+            #     out_list.append({"type": 'uint256', "name": arg.name})
+            # else:
+            out_list.append({"type": canonicalize_type(arg.typ), "name": arg.name})
+        return out_list
+
     def to_abi_dict(self):
         return {
             "name": self.name,
             "outputs": [{"type": canonicalize_type(self.output_type), "name": "out"}] if self.output_type else [],
-            "inputs": [{"type": canonicalize_type(arg.typ), "name": arg.name} for arg in self.args],
+            "inputs": self.get_abi_inputs(),
             "constant": self.const,
             "payable": self.payable,
             "type": "constructor" if self.name == "__init__" else "function"

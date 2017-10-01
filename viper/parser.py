@@ -322,8 +322,13 @@ def make_clamper(datapos, mempos, typ, is_init=False):
     else:
         data_decl = ['codeload', ['add', '~codelen', datapos]]
         copier = lambda pos, sz: ['codecopy', mempos, ['add', '~codelen', pos], sz]
+    # Create num256 -> num clamp.
+    if is_base_type(typ, 'num') and getattr(typ, 'apply_clamp', None) == 'num256':
+        return LLLnode.from_list(['uclamplt', data_decl, ['mload', MAXNUM_POS]],
+                                 typ=typ, annotation='checking num256 input')
     # Numbers: make sure they're in range
-    if is_base_type(typ, 'num'):
+    elif is_base_type(typ, 'num'):
+        # import pdb; pdb.set_trace()
         return LLLnode.from_list(['clamp', ['mload', MINNUM_POS], data_decl, ['mload', MAXNUM_POS]],
                                  typ=typ, annotation='checking num input')
     # Booleans: make sure they're zero or one
@@ -997,7 +1002,11 @@ def parse_stmt(stmt, context):
                 raise TypeMismatchException("Return type units mismatch %r %r" % (sub.typ, context.return_type), stmt.value)
             elif is_base_type(sub.typ, context.return_type.typ) or \
                     (is_base_type(sub.typ, 'num') and is_base_type(context.return_type, 'signed256')):
+                # import pdb; pdb.set_trace()
                 return LLLnode.from_list(['seq', ['mstore', 0, sub], ['return', 0, 32]], typ=None, pos=getpos(stmt))
+            elif is_base_type(sub.typ, context.return_type.typ) or \
+                    (is_base_type(sub.typ, 'num256') and is_base_type(context.return_type, 'num')):
+                return LLLnode.from_list(['seq', ['mstore', 0, sub], ['return', 0, 32]], typ=BaseType('num'), pos=getpos(stmt))
             else:
                 raise TypeMismatchException("Unsupported type conversion: %r to %r" % (sub.typ, context.return_type), stmt.value)
         # Returning a byte array
