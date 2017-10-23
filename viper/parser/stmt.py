@@ -69,6 +69,8 @@ class Stmt(object):
         return LLLnode.from_list('pass', typ=None, pos=getpos(self.stmt))
 
     def ann_assign(self):
+        if self.stmt.value:
+            raise VariableDeclarationException('You cannot declare and assign a variable on the same line', self.stmt.lineno)
         typ = parse_type(self.stmt.annotation, location='memory')
         varname = self.stmt.target.id
         pos = self.context.new_variable(varname, typ)

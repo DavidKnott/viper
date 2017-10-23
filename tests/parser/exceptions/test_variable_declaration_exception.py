@@ -16,6 +16,10 @@ x: num
 def foo(x: num): pass
     """,
     """
+def foo():
+    x:num = 1
+    """,
+    """
 def foo(x: num, x: num): pass
     """,
     """
