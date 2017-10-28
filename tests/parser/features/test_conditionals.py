@@ -19,3 +19,25 @@ def foo(i: bool) -> num:
     assert c.foo(False) == 7
 
     print('Passed conditional return tests')
+
+
+def test_and():
+    and_code = """
+def _truthy() -> bool:
+    return 1 and 1
+"""
+    c = get_contract_with_gas_estimation(and_code)
+    assert c._truthy() == True
+
+
+def test_or():
+    and_code = """
+def _truthy() -> bool:
+    return 1 or 0
+
+def _falsey() -> bool:
+    return 0 or 0
+"""
+    c = get_contract_with_gas_estimation(and_code)
+    assert c._truthy() == True
+    assert c._falsey() == False

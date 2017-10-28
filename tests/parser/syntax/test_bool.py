@@ -23,10 +23,6 @@ def foo():
     """
 def foo() -> bool:
     return (1 == 2) <= (1 == 1)
-    """,
-    """
-def foo() -> bool:
-    return (1 == 2) or 3
     """
 ]
 
@@ -47,11 +43,6 @@ valid_list = [
 def foo():
     x = true
     z = x and false
-    """,
-    """
-def foo():
-    x = true
-    z = x and False
     """,
     """
 def foo():

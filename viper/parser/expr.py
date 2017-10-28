@@ -340,8 +340,6 @@ class Expr(object):
             raise StructureException("Expected two arguments for a bool op", self.expr)
         left = Expr.parse_value_expr(self.expr.values[0], self.context)
         right = Expr.parse_value_expr(self.expr.values[1], self.context)
-        if not is_base_type(left.typ, 'bool') or not is_base_type(right.typ, 'bool'):
-            raise TypeMismatchException("Boolean operations can only be between booleans!", self.expr)
         if isinstance(self.expr.op, ast.And):
             op = 'and'
         elif isinstance(self.expr.op, ast.Or):
