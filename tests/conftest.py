@@ -1,11 +1,14 @@
 import pytest
 from ethereum.tools import tester
-from viper.parser.parser_utils import (
-    LLLnode
-)
 from viper import (
     compile_lll,
     optimizer
+)
+from viper.parser import (
+    parser
+)
+from viper.parser.parser_utils import (
+    LLLnode
 )
 
 @pytest.fixture
@@ -19,12 +22,19 @@ def t():
     tester.s = tester.Chain()
     return tester
 
+
+@pytest.fixture
+def get_lll():
+    def get_lll(source_code):
+        return parser.parse_tree_to_lll(parser.parse(source_code), source_code)
+    return get_lll
+
 @pytest.fixture
 def get_contract_from_lll(t):
     def lll_compiler(lll):
         lll = optimizer.optimize(LLLnode.from_list(lll))
         byte_code = compile_lll.assembly_to_evm(compile_lll.compile_to_assembly(lll))
-        t.s.tx(to=b'', data=byte_code)
+        return t.s.tx(to=b'', data=byte_code)
     return lll_compiler
 
 @pytest.fixture

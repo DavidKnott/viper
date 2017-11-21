@@ -398,7 +398,11 @@ def add_variable_offset(parent, key):
         else:
             subtype = typ.valuetype
             sub = base_type_conversion(key, key.typ, typ.keytype)
-        if location == 'storage':
+        if isinstance(typ, MappingType) and location == 'storage':
+            return LLLnode.from_list(['sha3_32', ['add', parent, ['sha3_32', sub]]],
+                                     typ=subtype,
+                                     location='storage')
+        elif location == 'storage':
             return LLLnode.from_list(['add', ['sha3_32', parent], sub],
                                      typ=subtype,
                                      location='storage')
