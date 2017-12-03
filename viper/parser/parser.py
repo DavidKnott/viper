@@ -9,6 +9,7 @@ from viper.exceptions import (
 from viper.function_signature import (
     FunctionSignature,
     VariableRecord,
+    ContractRecord
 )
 from viper.signatures.event_signature import (
     EventSignature
@@ -18,6 +19,7 @@ from viper.premade_contracts import (
 )
 from .stmt import Stmt
 from .expr import Expr
+from .context import Context
 from .parser_utils import LLLnode
 from .parser_utils import (
     get_length,
@@ -173,7 +175,23 @@ def add_contract(code):
     return _defs
 
 
+def get_item_name_and_attributes(item, attributes):
+    if isinstance(item, ast.Name):
+        return item.id, attributes
+    elif isinstance(item, ast.AnnAssign):
+        return get_item_name_and_attributes(item.annotation, attributes)
+    elif isinstance(item, ast.Subscript):
+        return get_item_name_and_attributes(item.value, attributes)
+    elif isinstance(item, ast.Call):
+        attributes[item.func.id] = True
+        # Raise for multiple args
+        return get_item_name_and_attributes(item.args[0], attributes)
+
+
 def add_globals_and_events(_contracts, _defs, _events, _getters, _globals, item):
+    item_attributes = {'public': False, 'trusted': False}
+    if not (isinstance(item.annotation, ast.Call) and item.annotation.func.id == "__log__"):
+        item_name, attributes = get_item_name_and_attributes(item, item_attributes)
     if item.value is not None:
         raise StructureException('May not assign value whilst defining type', item)
     elif isinstance(item.annotation, ast.Call) and item.annotation.func.id == "__log__":
@@ -200,8 +218,13 @@ def add_globals_and_events(_contracts, _defs, _events, _getters, _globals, item)
         premade_contract = premade_contracts[item.annotation.args[0].id]
         _contracts[item.target.id] = add_contract(premade_contract.body)
         _globals[item.target.id] = VariableRecord(item.target.id, len(_globals), BaseType('address'), True)
-    elif isinstance(item, ast.AnnAssign) and isinstance(item.annotation, ast.Name) and item.annotation.id in _contracts:
-        _globals[item.target.id] = VariableRecord(item.target.id, len(_globals), BaseType('address', item.annotation.id), True)
+    elif item_name in _contracts:
+        _globals[item.target.id] =  ContractRecord(item_attributes["trusted"], item.target.id, len(_globals), BaseType('address', item_name), True)
+        if item_attributes["public"]:
+            typ = BaseType('address', item.annotation.args[0].id)
+            for getter in mk_getter(item.target.id, typ):
+                _getters.append(parse_line('\n' * (item.lineno - 1) + getter))
+                _getters[-1].pos = getpos(item)
     elif isinstance(item.annotation, ast.Call) and item.annotation.func.id == "public":
         if len(item.annotation.args) != 1:
             raise StructureException("Public expects one arg (the type)")
@@ -249,59 +272,6 @@ initializer_list = ['seq', ['mstore', 28, ['calldataload', 0]]]
 # Store limit constants at fixed addresses in memory.
 initializer_list += [['mstore', pos, limit_size] for pos, limit_size in LOADED_LIMIT_MAP.items()]
 initializer_lll = LLLnode.from_list(initializer_list, typ=None)
-
-
-# Contains arguments, variables, etc
-class Context():
-    def __init__(self, vars=None, globals=None, sigs=None, forvars=None, return_type=None, is_constant=False, is_payable=False, origcode=''):
-        # In-memory variables, in the form (name, memory location, type)
-        self.vars = vars or {}
-        self.next_mem = MemoryPositions.RESERVED_MEMORY
-        # Global variables, in the form (name, storage location, type)
-        self.globals = globals or {}
-        # ABI objects, in the form {classname: ABI JSON}
-        self.sigs = sigs or {}
-        # Variables defined in for loops, eg. for i in range(6): ...
-        self.forvars = forvars or {}
-        # Return type of the function
-        self.return_type = return_type
-        # Is the function constant?
-        self.is_constant = is_constant
-        # Is the function payable?
-        self.is_payable = is_payable
-        # Number of placeholders generated (used to generate random names)
-        self.placeholder_count = 1
-        # Original code (for error pretty-printing purposes)
-        self.origcode = origcode
-        # In Loop status. Wether body is currently evaluating within a for-loop or not.
-        self.in_for_loop = set()
-
-    def set_in_for_loop(self, name_of_list):
-        self.in_for_loop.add(name_of_list)
-
-    def remove_in_for_loop(self, name_of_list):
-        self.in_for_loop.remove(name_of_list)
-
-    # Add a new variable
-    def new_variable(self, name, typ):
-        if not is_varname_valid(name):
-            raise VariableDeclarationException("Variable name invalid or reserved: " + name)
-        if name in self.vars or name in self.globals:
-            raise VariableDeclarationException("Duplicate variable name: %s" % name)
-        self.vars[name] = VariableRecord(name, self.next_mem, typ, True)
-        pos = self.next_mem
-        self.next_mem += 32 * get_size_of_type(typ)
-        return pos
-
-    # Add an anonymous variable (used in some complex function definitions)
-    def new_placeholder(self, typ):
-        name = '_placeholder_' + str(self.placeholder_count)
-        self.placeholder_count += 1
-        return self.new_variable(name, typ)
-
-    # Get the next unused memory location
-    def get_next_mem(self):
-        return self.next_mem
 
 
 # Is a function the initializer?
@@ -486,7 +456,7 @@ def parse_body(code, context):
     return LLLnode.from_list(['seq'] + o, pos=getpos(code[0]) if code else None)
 
 
-def external_contract_call_stmt(stmt, context, contract_name, contract_address):
+def external_contract_call_stmt(stmt, context, contract_name, contract_address, is_trusted):
     if contract_name not in context.sigs:
         raise VariableDeclarationException("Contract not declared yet: %s" % contract_name)
     method_name = stmt.func.attr
@@ -497,10 +467,12 @@ def external_contract_call_stmt(stmt, context, contract_name, contract_address):
     inargs, inargsize = pack_arguments(sig, [parse_expr(arg, context) for arg in stmt.args], context)
     sub = ['seq', ['assert', ['extcodesize', contract_address]],
                     ['assert', ['ne', 'address', contract_address]]]
-    if context.is_constant:
+    if context.is_constant or not context.state_safe:
         sub.append(['assert', ['staticcall', 'gas', contract_address, inargs, inargsize, 0, 0]])
     else:
         sub.append(['assert', ['call', 'gas', contract_address, 0, inargs, inargsize, 0, 0]])
+    if not is_trusted:
+        context.state_safe = False
     o = LLLnode.from_list(sub, typ=sig.output_type, location='memory', pos=getpos(stmt))
     return o
 

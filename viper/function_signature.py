@@ -32,6 +32,13 @@ class VariableRecord():
         return get_size_of_type(self.typ)
 
 
+class ContractRecord(VariableRecord):
+    def __init__(self, trusted, *args):
+        super(ContractRecord, self).__init__(*args)
+        self.trusted = trusted
+
+
+
 # Function signature object
 class FunctionSignature():
     def __init__(self, name, args, output_type, const, payable, private, sig, method_id):

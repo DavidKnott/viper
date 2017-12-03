@@ -126,18 +126,17 @@ class Stmt(object):
         elif isinstance(self.stmt.func, ast.Attribute) and isinstance(self.stmt.func.value, ast.Call):
             contract_name = self.stmt.func.value.func.id
             contract_address = Expr.parse_value_expr(self.stmt.func.value.args[0], self.context)
-            return external_contract_call_stmt(self.stmt, self.context, contract_name, contract_address)
+            return external_contract_call_stmt(self.stmt, self.context, contract_name, contract_address, False)
         elif isinstance(self.stmt.func.value, ast.Attribute) and self.stmt.func.value.attr in self.context.sigs:
             contract_name = self.stmt.func.value.attr
             var = self.context.globals[self.stmt.func.value.attr]
             contract_address = unwrap_location(LLLnode.from_list(var.pos, typ=var.typ, location='storage', pos=getpos(self.stmt), annotation='self.' + self.stmt.func.value.attr))
-            return external_contract_call_stmt(self.stmt, self.context, contract_name, contract_address)
+            return external_contract_call_stmt(self.stmt, self.context, contract_name, contract_address, var.trusted)
         elif isinstance(self.stmt.func.value, ast.Attribute) and self.stmt.func.value.attr in self.context.globals:
             contract_name = self.context.globals[self.stmt.func.value.attr].typ.unit
             var = self.context.globals[self.stmt.func.value.attr]
             contract_address = unwrap_location(LLLnode.from_list(var.pos, typ=var.typ, location='storage', pos=getpos(self.stmt), annotation='self.' + self.stmt.func.value.attr))
-            # import pdb; pdb.set_trace()
-            return external_contract_call_stmt(self.stmt, self.context, contract_name, contract_address)
+            return external_contract_call_stmt(self.stmt, self.context, contract_name, contract_address, var.trusted)
         elif isinstance(self.stmt.func, ast.Attribute) and self.stmt.func.value.id == 'log':
             if self.stmt.func.attr not in self.context.sigs['self']:
                 raise VariableDeclarationException("Event not declared yet: %s" % self.stmt.func.attr)
