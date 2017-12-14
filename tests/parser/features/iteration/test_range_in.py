@@ -74,6 +74,18 @@ def testin() -> bool:
     assert_compile_failed(lambda: get_contract_with_gas_estimation(code), TypeMismatchException)
 
 
+def test_subtype_in_list_doesnt_match_list_type(assert_compile_failed, get_contract_with_gas_estimation):
+    code = """
+@public
+def testin(x: address) -> bool:
+    s = [1, 2, 3, 4]
+    if x in s:
+        return True
+    return False
+"""
+    assert_compile_failed(lambda: get_contract_with_gas_estimation(code), TypeMismatchException)
+
+
 def test_ownership(t, assert_tx_failed, get_contract_with_gas_estimation):
     code = """
 

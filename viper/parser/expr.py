@@ -363,7 +363,8 @@ class Expr(object):
         right = Expr.parse_value_expr(self.expr.comparators[0], self.context)
         if isinstance(self.expr.ops[0], ast.In) and \
            isinstance(right.typ, ListType):
-            if not are_units_compatible(left.typ, right.typ.subtype) and not are_units_compatible(right.typ.subtype, left.typ):
+            if (not are_units_compatible(left.typ, right.typ.subtype) and
+            not are_units_compatible(right.typ.subtype, left.typ)) or not left.typ.typ == right.typ.subtype.typ:
                 raise TypeMismatchException("Can't use IN comparison with different types!", self.expr)
             return self.build_in_comparator()
         else:
